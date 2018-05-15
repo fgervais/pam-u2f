@@ -50,6 +50,8 @@ typedef struct {
 typedef struct {
   char *publicKey;
   char *keyHandle;
+  char *coseType;
+  char *attributes;
 } device_t;
 
 int get_devices_from_authfile(const char *authfile, const char *username,
