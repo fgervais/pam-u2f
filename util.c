@@ -604,6 +604,7 @@ int do_manual_authentication(const cfg_t *cfg, const device_t *devices,
                              const unsigned n_devs, pam_handle_t *pamh) {
   fido_assert_t *assert[n_devs];
   es256_pk_t *es256_pk[n_devs];
+  rs256_pk_t *rs256_pk[n_devs];
   unsigned char challenge[32];
   unsigned char *kh = NULL;
   unsigned char *pk = NULL;
@@ -615,6 +616,7 @@ int do_manual_authentication(const cfg_t *cfg, const device_t *devices,
   size_t kh_len;
   size_t pk_len;
   size_t resp_len;
+  int cose_type[n_devs];
   int retval = -2;
   int n;
   int r;
@@ -622,6 +624,7 @@ int do_manual_authentication(const cfg_t *cfg, const device_t *devices,
 
   memset(assert, 0, sizeof(assert));
   memset(es256_pk, 0, sizeof(es256_pk));
+  memset(rs256_pk, 0, sizeof(rs256_pk));
 
   fido_init(cfg->debug ? FIDO_DEBUG : 0);
 
@@ -641,30 +644,33 @@ int do_manual_authentication(const cfg_t *cfg, const device_t *devices,
       goto out;
     }
 
+    if (strchr(devices[i].attributes, '+'))
+      fido_assert_set_options(assert[i], true, false);
+    else
+      fido_assert_set_options(assert[i], false, false);
+
     if (cfg->debug)
       D(cfg->debug_file, "Attempting authentication with device number %d", i + 1);
 
-    if (!b64_decode(devices[i].keyHandle, (void **)&kh, &kh_len)) {
+    if (!strcmp(devices[i].keyHandle, "*")) {
       if (cfg->debug)
-        D(cfg->debug_file, "Failed to decode key handle");
-      goto out;
-    }
+        D(cfg->debug_file, "Credential is resident");
+    } else {
+      if (!b64_decode(devices[i].keyHandle, (void **)&kh, &kh_len)) {
+        if (cfg->debug)
+          D(cfg->debug_file, "Failed to decode key handle");
+        goto out;
+      }
 
-    r = fido_assert_allow_cred(assert[i], kh, kh_len);
-    if (r != FIDO_OK) {
-      if (cfg->debug)
-        D(cfg->debug_file, "Unable to set keyHandle: %s (%d)", fido_strerr(r), r);
-      goto out;
-    }
+      r = fido_assert_allow_cred(assert[i], kh, kh_len);
+      if (r != FIDO_OK) {
+        if (cfg->debug)
+          D(cfg->debug_file, "Unable to set keyHandle: %s (%d)", fido_strerr(r), r);
+        goto out;
+      }
 
-    free(kh);
-    kh = NULL;
-
-    es256_pk[i] = es256_pk_new();
-    if (!es256_pk[i]) {
-      if (cfg->debug)
-        D(cfg->debug_file, "Unable to allocate key %u", i);
-      goto out;
+      free(kh);
+      kh = NULL;
     }
 
     if (!b64_decode(devices[i].publicKey, (void **)&pk, &pk_len)) {
@@ -673,10 +679,36 @@ int do_manual_authentication(const cfg_t *cfg, const device_t *devices,
       goto out;
     }
 
-    if (es256_pk_from_ptr(es256_pk[i], pk, pk_len) != FIDO_OK) {
-      if (cfg->debug)
-        D(cfg->debug_file, "Failed to convert public key");
-      goto out;
+    if (!strcmp(devices[i].coseType, "es256")) {
+      es256_pk[i] = es256_pk_new();
+      if (!es256_pk[i]) {
+        if (cfg->debug)
+          D(cfg->debug_file, "Unable to allocate key %u", i);
+        goto out;
+      }
+
+      if (es256_pk_from_ptr(es256_pk[i], pk, pk_len) != FIDO_OK) {
+        if (cfg->debug)
+          D(cfg->debug_file, "Failed to convert public key");
+        goto out;
+      }
+
+      cose_type[i] = COSE_ES256;
+    } else {
+      rs256_pk[i] = rs256_pk_new();
+      if (!rs256_pk[i]) {
+        if (cfg->debug)
+          D(cfg->debug_file, "Unable to allocate key %u", i);
+        goto out;
+      }
+
+      if (rs256_pk_from_ptr(rs256_pk[i], pk, pk_len) != FIDO_OK) {
+        if (cfg->debug)
+          D(cfg->debug_file, "Failed to convert public key");
+        goto out;
+      }
+
+      cose_type[i] = COSE_RS256;
     }
 
     free(pk);
@@ -711,8 +743,9 @@ int do_manual_authentication(const cfg_t *cfg, const device_t *devices,
       converse(pamh, PAM_TEXT_INFO, prompt);
     }
 
-    n = snprintf(buf, sizeof(buf), "%s,%s,%s", cfg->origin,
-                 devices[i].keyHandle, b64_challenge);
+    n = snprintf(buf, sizeof(buf), "%s,%s,%s,%s,%s", cfg->origin,
+                 devices[i].keyHandle, b64_challenge, devices[i].coseType,
+                 devices[i].attributes);
     if (n <= 0 || (size_t)n >= sizeof(buf)) {
       if (cfg->debug)
         D(cfg->debug_file, "Failed to print fido2-host input string");
@@ -760,7 +793,11 @@ int do_manual_authentication(const cfg_t *cfg, const device_t *devices,
     free(resp);
     resp = NULL;
 
-    r = fido_assert_verify(assert[i], 0, COSE_ES256, es256_pk[i]);
+    if (cose_type[i] == COSE_ES256)
+      r = fido_assert_verify(assert[i], 0, COSE_ES256, es256_pk[i]);
+    else
+      r = fido_assert_verify(assert[i], 0, COSE_RS256, rs256_pk[i]);
+
     if (r != FIDO_OK) {
       retval = 1;
       break;
@@ -771,6 +808,7 @@ out:
   for (i = 0; i < n_devs; i++) {
     fido_assert_free(&assert[i]);
     es256_pk_free(&es256_pk[i]);
+    rs256_pk_free(&rs256_pk[i]);
   }
 
   free(kh);
