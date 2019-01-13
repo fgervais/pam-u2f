@@ -661,7 +661,7 @@ int do_authentication(const cfg_t *cfg, const device_t *devices,
               converse(pamh, PAM_TEXT_INFO, DEFAULT_CUE);
             }
             retval = -1;
-            fido_assert_set_options(assert, true, false);
+            fido_assert_set_options(assert, true, cfg->userverification);
             r = fido_dev_get_assert(authlist[j], assert, NULL);
           } else
             continue;
@@ -793,7 +793,7 @@ int do_manual_authentication(const cfg_t *cfg, const device_t *devices,
     }
 
     if (strchr(devices[i].attributes, '+'))
-      fido_assert_set_options(assert[i], true, false);
+      fido_assert_set_options(assert[i], true, cfg->userverification);
     else
       fido_assert_set_options(assert[i], false, false);
 
