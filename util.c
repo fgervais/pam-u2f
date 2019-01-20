@@ -479,6 +479,7 @@ int do_authentication(const cfg_t *cfg, const device_t *devices,
   int r;
   int retval = -2;
   int cose_type;
+  int force_userpresence = 0;
   size_t kh_len;
   size_t ndevs = 0;
   size_t ndevs_prev = 0;
@@ -644,23 +645,24 @@ int do_authentication(const cfg_t *cfg, const device_t *devices,
     }
 
     if (get_authenticators(cfg, devlist, ndevs, assert, kh, authlist)) {
+      force_userpresence = 0;
+
       for (size_t j = 0; authlist[j] != NULL; j++) {
-        fido_assert_set_options(assert, false, false);
-        r = fido_dev_get_assert(authlist[j], assert, NULL);
-        if (cfg->userpresence) {
-          if ((!fido_dev_is_fido2(authlist[j]) &&
-              r == FIDO_ERR_USER_PRESENCE_REQUIRED) || r == FIDO_OK) {
-            if (cfg->manual == 0 && cfg->cue && !cued) {
-              cued = 1;
-              converse(pamh, PAM_TEXT_INFO, DEFAULT_CUE);
-            }
-            retval = -1;
-            fido_assert_set_options(assert, true, false);
-            r = fido_dev_get_assert(authlist[j], assert, NULL);
-          } else
-            continue;
+retry:
+        fido_assert_set_options(assert,
+                                cfg->userpresence || force_userpresence,
+                                cfg->userverification);
+        if (cfg->manual == 0 && cfg->cue && !cued) {
+          cued = 1;
+          converse(pamh, PAM_TEXT_INFO, DEFAULT_CUE);
         }
-        if (r == FIDO_OK) {
+
+        r = fido_dev_get_assert(authlist[j], assert, NULL);
+        if (r == FIDO_ERR_USER_PRESENCE_REQUIRED && !force_userpresence) {
+          force_userpresence = 1;
+          goto retry;
+        }
+        else if (r == FIDO_OK) {
           r = fido_assert_verify(assert, 0, cose_type, cose_type == COSE_ES256 ?
                                 (const void *)es256_pk : (const void *)rs256_pk);
           if (r == FIDO_OK) {

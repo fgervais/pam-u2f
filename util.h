@@ -18,7 +18,7 @@
 #define DEFAULT_AUTHFILE "/Yubico/u2f_keys"
 #define DEFAULT_AUTHPENDING_FILE_PATH "/var/run/user/%d/pam-u2f-authpending"
 #define DEFAULT_PROMPT "Insert your U2F device, then press ENTER."
-#define DEFAULT_CUE "Please touch the device."
+#define DEFAULT_CUE "Please touch the device or present biometrics."
 #define DEFAULT_ORIGIN_PREFIX "pam://"
 #define DEBUG_STR "debug(pam_u2f): %s:%d (%s): "
 
