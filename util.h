@@ -39,6 +39,7 @@ typedef struct {
   int interactive;
   int cue;
   int nodetect;
+  int userpresence;
   int userverification;
   const char *auth_file;
   const char *authpending_file;
