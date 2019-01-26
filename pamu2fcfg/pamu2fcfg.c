@@ -34,7 +34,6 @@ int main(int argc, char *argv[]) {
   size_t ndevs;
   int cose_type;
   int resident_key;
-  int user_presence;
   int r;
   char *origin = NULL;
   char *appid = NULL;
@@ -166,11 +165,6 @@ int main(int argc, char *argv[]) {
   else
     resident_key = 0;
 
-  if (args_info.no_user_presence_given)
-    user_presence = 0;
-  else
-    user_presence = 1;
-
   r = fido_cred_set_options(cred, resident_key, false);
   if (r != FIDO_OK) {
     fprintf(stderr, "error: fido_cred_set_options (%d) %s\n", r,
@@ -287,9 +281,8 @@ int main(int argc, char *argv[]) {
   if (!args_info.nouser_given)
     printf("%s", user);
 
-  printf(":%s,%s,%s,%s", resident_key ? "*" : b64_kh, b64_pk,
-         cose_type == COSE_ES256 ? "es256" : "rs256",
-         user_presence ? "+" : "-");
+  printf(":%s,%s,%s", resident_key ? "*" : b64_kh, b64_pk,
+         cose_type == COSE_ES256 ? "es256" : "rs256");
 
   exit_code = EXIT_SUCCESS;
 
