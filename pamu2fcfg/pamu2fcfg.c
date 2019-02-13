@@ -6,6 +6,8 @@
 #define PAM_PREFIX "pam://"
 #define TIMEOUT 15
 #define FREQUENCY 1
+#define MAX_PIN_SIZE_BYTE 255
+#define UTF8_CHAR_MAX_SIZE 4
 
 #include <fido.h>
 
@@ -14,12 +16,48 @@
 #include <string.h>
 #include <getopt.h>
 #include <unistd.h>
+#include <termios.h>
 #include <sys/types.h>
 #include <pwd.h>
 
 #include "b64.h"
 #include "cmdline.h"
 #include "util.h"
+
+/*
+ * From https://stackoverflow.com/q/1196418
+ */
+char *readpassphrase(const char *prompt, char *buf, size_t bufsiz) {
+  struct termios oflags, nflags;
+  char *ret = NULL;
+
+  /* disabling echo */
+  tcgetattr(fileno(stdin), &oflags);
+  nflags = oflags;
+  nflags.c_lflag &= ~ECHO;
+  nflags.c_lflag |= ECHONL;
+
+  if (tcsetattr(fileno(stdin), TCSANOW, &nflags) != 0) {
+      fprintf(stderr, "error: %s: tcsetattr\n", __func__);
+      goto out;
+  }
+
+  printf("%s", prompt);
+  if (fgets(buf, bufsiz, stdin)) {
+    buf[strlen(buf) - 1] = 0;
+    ret = buf;
+  }
+
+  printf("you typed '%s'\n", buf);
+  printf("strlen = %ld\n", strlen(buf));
+
+out:
+  /* restore terminal */
+  if (tcsetattr(fileno(stdin), TCSANOW, &oflags) != 0)
+      fprintf(stderr, "error: %s: tcsetattr\n", __func__);
+
+  return ret;
+}
 
 int main(int argc, char *argv[]) {
   int exit_code = EXIT_FAILURE;
@@ -38,6 +76,7 @@ int main(int argc, char *argv[]) {
   char *origin = NULL;
   char *appid = NULL;
   char *user = NULL;
+  char *pin = NULL;
   char *b64_kh;
   char *b64_pk;
   struct passwd *passwd;
@@ -232,7 +271,22 @@ int main(int argc, char *argv[]) {
     exit(EXIT_FAILURE);
   }
 
-  r = fido_dev_make_cred(dev, cred, NULL);
+retry:
+  r = fido_dev_make_cred(dev, cred, pin);
+  if (r == FIDO_ERR_PIN_REQUIRED) {
+    pin = malloc(MAX_PIN_SIZE_BYTE);
+    if (!readpassphrase("PIN number: ", pin,
+        (MAX_PIN_SIZE_BYTE-1)/UTF8_CHAR_MAX_SIZE)) {
+      fprintf(stderr, "error: readpassphrase\n");
+      exit(EXIT_FAILURE);
+    }
+    goto retry;
+  }
+  if (pin) {
+    explicit_bzero(pin, MAX_PIN_SIZE_BYTE);
+    free(pin);
+  }
+
   if (r != FIDO_OK) {
     fprintf(stderr, "error: fido_dev_make_cred (%d) %s\n", r, fido_strerr(r));
     exit(EXIT_FAILURE);
